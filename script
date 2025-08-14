@@ -1,0 +1,93 @@
+import os
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.cluster.hierarchy import leaves_list
+
+# folder paths
+input_folder = "path/to/excel_files"        
+output_folder = "path/to/output_heatmaps"   
+
+# process Excel files in the input folder
+for filename in os.listdir(input_folder):
+    if filename.endswith(".xlsx"):
+        file_path = os.path.join(input_folder, filename)
+        output_path = os.path.join(output_folder, filename.replace('.xlsx', ''))
+
+        # load data
+        df = pd.read_excel(file_path)
+
+        # first two columns are used as an index
+        df.set_index([df.columns[0], df.columns[1]], inplace=True)
+
+        # truncate gene names 
+        truncated_gene_names = df.index.get_level_values(1).str[:50]
+
+        # create combined labels for y-axis (ID + Truncated Gene Name)
+        df['Combined_Labels'] = df.index.get_level_values(0).astype(str) + '; ' + truncated_gene_names
+
+        # select numerical data (next N columns)
+        df_numeric = df.iloc[:, :16].apply(pd.to_numeric, errors='coerce')
+
+        # replace infinite values with NaN 
+        df_numeric = df_numeric.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+        # clip numerical values
+        df_numeric = df_numeric.clip(lower=0, upper=25)
+
+        # extract labels matching cleaned numeric data
+        filtered_labels = df['Combined_Labels']
+
+        # dynamic figure size based on number of rows and columns
+        num_genes = df_numeric.shape[0]
+        num_columns = df_numeric.shape[1]
+        height = max(5, num_genes * 0.2)
+        adjusted_width = max(6, num_columns * 0.6)
+
+        # generate euclidean clustered heatmap
+        clustergrid = sns.clustermap(
+            df_numeric,
+            figsize=(adjusted_width, height),
+            cmap='OrRd',
+            vmin=0,
+            vmax=25,
+            cbar_kws={"orientation": "horizontal", "shrink": 0.2},
+            row_cluster=True,
+            col_cluster=False,
+            metric="Euclidean",
+            method="average",
+            yticklabels=filtered_labels,
+            xticklabels=True,
+            annot=False,
+            dendrogram_ratio=(0.1, 0.2)
+        )
+
+        # move color bar away from heatmap
+        clustergrid.cax.set_position([0.4, 0.93, 0.2, 0.02])
+
+        # extract row linkage info for ordered labels
+        row_linkage = clustergrid.dendrogram_row.linkage
+        ordered_indices = leaves_list(row_linkage)
+        ordered_labels = filtered_labels.iloc[ordered_indices]
+
+        # save ordered labels as Excel list
+        ordered_labels.to_excel(f'{output_path}_ordered_labels.xlsx', index=False)
+
+        #  font sizes
+        plt.setp(clustergrid.ax_heatmap.yaxis.get_majorticklabels(), fontsize=8, rotation=0)
+        plt.setp(clustergrid.ax_heatmap.xaxis.get_majorticklabels(), fontsize=7, rotation=45, ha='right')
+        clustergrid.ax_heatmap.yaxis.set_tick_params(pad=1)
+
+        # optimize layout
+        plt.tight_layout(pad=0.6)
+
+        # save PNG and PDF
+        plt.savefig(f'{output_path}.png', bbox_inches='tight')
+        plt.savefig(f'{output_path}.pdf', bbox_inches='tight')
+        plt.close()
+
+        print(f'Heatmap saved as {output_path}.pdf')
+        print(f'Ordered labels saved as {output_path}_ordered_labels.xlsx')
+
+print("All heatmaps have been generated successfully!")
